@@ -1,0 +1,105 @@
+---
+title: "RedditStocks"
+author: "Danny Tayman"
+date: "2025-04-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(janeaustenr)
+library(readr)
+library(tidytext)
+library("stopwords")
+posts <- read_csv("C:/Users/tdan1/Downloads/reddit_posts_combined_20250423_140014.csv")
+stocks_list <- read_csv("C:/Users/tdan1/Downloads/Draft Rankings - Sheet19 (1).csv")
+stop_words <- stopwords(language = "en")
+remove_words <- as.data.frame(stop_words)
+colnames(remove_words)[1] <- "word"
+head(posts)
+stock_prices <- read_csv("C:/Users/tdan1/Downloads/final_stock_data.csv")
+word_scores <- read_csv("C:/Users/tdan1/Downloads/Hedonometer.csv")
+colnames(word_scores) <- c("rnk", "word", "eng", "Happiness", "sd")
+```
+
+
+```{r}
+colnames(stocks_list) <- c("word", "name")
+words <- posts %>%
+  unnest_tokens(output = word, input = selftext) %>%
+  count(word, sort = TRUE)
+words
+stocks_list
+words <- words %>%
+      anti_join(x = words, y = remove_words, by = "word")
+words$word <- tolower(words$word)
+stocks_list$word <- tolower(stocks_list$word)
+words <- words %>%
+  left_join(x = words, y = stocks_list, by = "word") %>%
+  filter(!is.na(name)) %>%
+  filter(!is.na(word)) %>%
+  filter(n >= 10)
+real_words_not_stocks <- as.data.frame(c("can", "now", "s", "ai", "good", "see", "next", "day", "cash", "well", "r", "pay", "move", "go", "two", "way", "low", "post", "ago", "lot", "net", "vs", "car", "job", "top", "tech", "edit", "open", "key", "gold", "real", "loan", "live", "hit", "run", "play", "add", "ever", "gain", "june", "else", "hi", "true", "line", "nice", "x", "grow", "drug", "max", "care", "e", "love", "app", "note", "safe", "uk", "kind", "team", "hope", "rent", "plus", "bill", "fast", "mind", "game", "pre", "fact", "self", "turn", "base", "five", "main", "step", "beat", "four", "kids", "link", "form", "west", "talk", "air", "hour", "luck", "act", "blue", "cc", "eye", "bull", "math", "prop", "wave", "site", "fun", "riot", "earn", "path", "fix", "leg", "rare", "tv", "shot", "lab", "pays", "apps", "onto", "pump", "boom", "box", "bros", "mass", "zone", "road", "bio", "race", "lake", "gift", "wash", "pool", "cook", "eat", "hut", "snow", "bc", "cent", "town", "hive", "pet", "root", "glad", "dave", "skin"))
+colnames(real_words_not_stocks)[1] <- "word"
+words <- words %>%
+      anti_join(x = words, y = real_words_not_stocks, by = "word")
+words$word
+posts %>%
+  arrange(desc(created_utc)) %>%
+  tail()
+```
+
+
+```{r}
+stock_prices %>%
+  group_by(ticker) %>%
+  summarise(n())
+dim(words)
+words_posts <- posts %>%
+  group_by(id) %>%
+  unnest_tokens(output = word, input = selftext) %>%
+  count(word, sort = TRUE)
+head(words_posts)
+
+stocks_in_posts <- left_join(words_posts, words, by = "word") %>%
+  filter(!is.na(name))
+
+post_happiness <- left_join(words_posts, word_scores, by = "word") %>%
+  filter(!is.na(word)) %>%
+  group_by(id) %>%
+  summarise(Rating = mean(Happiness * n, na.rm = TRUE) / n(), id = first(id))
+
+head(stocks_in_posts)
+stocks_with_rating <- left_join(stocks_in_posts, post_happiness, by = "id")
+
+stocks_rating_time <- dplyr::select(left_join(stocks_with_rating, posts, by = "id"), c(id, word, name, Rating, created_utc))
+```
+
+
+```{r}
+write.csv(stocks_rating_time, "C:/Users/tdan1/DSS/stocks_with_rating.csv")
+##STOCKS_RATING_TIME
+head(stocks_rating_time)
+
+stocks_rating_time$date <- as.Date(stocks_rating_time$created_utc)
+stocks_rating_time$time <- format(stocks_rating_time$created_utc, "%H:%M:%S")
+stocks_rating_time$ticker_date <- paste(stocks_rating_time$word, stocks_rating_time$date)
+stock_prices$ticker <- tolower(stock_prices$ticker)
+stock_prices
+stock_prices$date <- as.Date(stock_prices$timestamp)
+stock_prices$ticker_date <- paste(stock_prices$ticker, stock_prices$date)
+df <- left_join(stocks_rating_time, stock_prices, by = "ticker_date") %>%
+  arrange(date.x) %>%
+  filter(!is.na(open))
+
+summary(lm(df$price_diff ~ df$Rating, data = df))
+head(df)
+summary(lm(close ~ open + Rating, data = df))
+mentions <- df %>%
+  group_by(ticker_date) %>%
+  summarise(mentions = n(), price_diff = first(price_diff))
+summary(lm(price_diff ~ mentions, data = mentions))
+```
+
